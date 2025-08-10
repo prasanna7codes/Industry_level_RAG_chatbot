@@ -1,0 +1,9 @@
+# Ignore the file containing secret environment variables
+.env
+
+# Ignore the Python virtual environment folder
+/corrective_rag/
+
+# Ignore Python cache files
+__pycache__/
+*.pyc
