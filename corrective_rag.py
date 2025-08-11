@@ -26,12 +26,15 @@ from langchain_community.vectorstores.utils import filter_complex_metadata
 from firecrawl import FirecrawlApp
 from langchain.docstore.document import Document
 
+from langchain_pinecone import Pinecone
+
+
+
 
 
 
 # --- 2. DOCUMENT LOADING AND PROCESSING ---
 
-# URLs to scrape
 urls = [
     "https://www.thworks.org/",
 ]
@@ -79,15 +82,36 @@ print(f"\n--- Successfully loaded and split {len(docs_list)} documents into {len
 # Use Google's embeddings model
 embedding_model = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
 
-# Add documents to Chroma vector store
-print("\n--- Creating vector store... ---")
-vectorstore = Chroma.from_documents(
+# --- 3. VECTOR STORE AND PINEcone Multi-Tenant RETRIEVER ---
+
+# This is the name of the index you created in the Pinecone dashboard
+index_name = "corrective-rag-app" 
+
+# For this example, we'll pretend we're processing data for "client-abc-123"
+# In a real app, this would be dynamic based on which user is logged in.
+client_id_namespace = "client-abc-123" 
+
+
+print(f"\n--- Adding documents to Pinecone index '{index_name}' in namespace '{client_id_namespace}' ---")
+
+# The from_documents method will add the documents to the specified namespace.
+# If the index does not exist, it will create it.
+vectorstore = Pinecone.from_documents(
     documents=doc_splits,
-    collection_name="rag-chroma-gemini",
     embedding=embedding_model,
+    index_name=index_name,
+    namespace=client_id_namespace  # This is the key to isolating client data
 )
+
+print(f"--- Creating retriever scoped to namespace '{client_id_namespace}' ---")
+# The retriever created from this vectorstore will automatically search only
+# within the 'client-abc-123' namespace.
 retriever = vectorstore.as_retriever()
-print("--- Vector store created successfully. ---")
+
+print("--- Pinecone vector store and retriever are ready. ---")
+
+
+
 
 # --- 4. SETUP LLMS AND GRADERS ---
 
