@@ -28,10 +28,12 @@ from langchain.docstore.document import Document
 
 from langchain_pinecone import Pinecone
 
+from llama_cloud_services import LlamaParse
 
 
 
-# --- 2. DOCUMENT LOADING AND PROCESSING ---
+
+# --- 1. Firecrawl Website Scraping ---
 
 urls = ["https://www.thworks.org/"]
 docs_list = []
@@ -42,73 +44,89 @@ print("--- Scraping URLs using Firecrawl SDK ---")
 for url in urls:
     try:
         result = app.scrape_url(url, formats=["markdown", "html"])
-
-        # Convert ScrapeResponse to dict if needed
         if hasattr(result, "model_dump"):
             result = result.model_dump()
-
-        # Debug print full result to understand what is returned
         print(f"Full scrape result for {url}:", result)
-
-        # Extract content - prefer markdown, fallback to html
-        content = result.get("markdown", "")
-        if not content.strip():
-            content = result.get("html", "")
-
+        content = result.get("markdown", "") or result.get("html", "")
         if not content.strip():
             raise ValueError("Empty content returned")
-
         docs_list.append(Document(page_content=content, metadata={"source": url}))
         print(f"--- Successfully scraped: {url} ---")
-
     except Exception as e:
         print(f"--- FAILED to scrape {url}. Error: {e} ---")
 
 if not docs_list:
-    print("\n--- ERROR: No documents were scraped. Exiting ---")
+    print("\n--- ERROR: No website documents were scraped. Exiting ---")
     exit()
 
 filtered_docs = filter_complex_metadata(docs_list)
-
 text_splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(
     chunk_size=500,
     chunk_overlap=100
 )
-doc_splits = text_splitter.split_documents(filtered_docs)
+website_doc_splits = text_splitter.split_documents(filtered_docs)
+print(f"\n--- Loaded and split {len(filtered_docs)} website docs into {len(website_doc_splits)} chunks. ---")
 
-print(f"\n--- Successfully loaded and split {len(filtered_docs)} documents into {len(doc_splits)} chunks. ---")
-# --- 3. VECTOR STORE AND RETRIEVER ---
+# --- 2. PDF Parsing using LlamaParse Cloud API ---
 
-# Use Google's embeddings model
+llama_api_key = os.environ.get("LLAMA_CLOUD_API_KEY")
+if not llama_api_key:
+    raise ValueError("Set LLAMA_CLOUD_API_KEY in your environment")
+
+parser = LlamaParse(
+    api_key=llama_api_key,
+    num_workers=4,
+    verbose=True,
+    language="en",
+)
+
+# Replace with your actual uploaded PDF path or list of paths
+pdf_paths = ["NIPS-2017-attention-is-all-you-need-Paper.pdf"]  # single or list of pdf paths
+
+# Parsing PDFs using LlamaParse
+print("--- Parsing PDFs using LlamaParse ---")
+pdf_docs = []
+for pdf_path in pdf_paths:
+    try:
+        result = parser.parse(pdf_path)
+        markdown_docs = result.get_markdown_documents(split_by_page=True)
+        for md_doc in markdown_docs:
+            print(dir(md_doc))  # to see all attributes
+            print(md_doc)       # print object repr
+            content = getattr(md_doc, "page_content", None) or getattr(md_doc, "text", None) or str(md_doc)
+            metadata = getattr(md_doc, "metadata", {})
+            pdf_docs.append(Document(page_content=content, metadata=metadata))
+        print(f"--- Successfully parsed PDF: {pdf_path} with {len(markdown_docs)} chunks ---")
+    except Exception as e:
+        print(f"--- FAILED to parse PDF {pdf_path}. Error: {e} ---")
+
+
+if not pdf_docs:
+    print("\n--- WARNING: No PDF documents parsed ---")
+
+# --- 3. Combine Website + PDF docs ---
+
+all_docs = website_doc_splits + pdf_docs
+print(f"--- Total documents to add to Pinecone: {len(all_docs)} ---")
+
+# --- 4. Setup Pinecone Vector Store ---
+
 embedding_model = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+index_name = "corrective-rag-app"
+client_id_namespace = "client2-th-again"
 
-# --- 3. VECTOR STORE AND PINEcone Multi-Tenant RETRIEVER ---
-
-# This is the name of the index you created in the Pinecone dashboard
-index_name = "corrective-rag-app" 
-
-# For this example, we'll pretend we're processing data for "client-abc-123"
-# In a real app, this would be dynamic based on which user is logged in.
-client_id_namespace = "client2-th-again" 
-
-
-print(f"\n--- Adding documents to Pinecone index '{index_name}' in namespace '{client_id_namespace}' ---")
-
-# The from_documents method will add the documents to the specified namespace.
-# If the index does not exist, it will create it.
+print(f"\n--- Adding all documents to Pinecone index '{index_name}' with namespace '{client_id_namespace}' ---")
 vectorstore = Pinecone.from_documents(
-    documents=doc_splits,
+    documents=all_docs,
     embedding=embedding_model,
     index_name=index_name,
-    namespace=client_id_namespace  # This is the key to isolating client data
+    namespace=client_id_namespace
 )
 
 print(f"--- Creating retriever scoped to namespace '{client_id_namespace}' ---")
-# The retriever created from this vectorstore will automatically search only
-# within the 'client-abc-123' namespace.
 retriever = vectorstore.as_retriever()
 
-print("--- Pinecone vector store and retriever are ready. ---")
+print("--- Pinecone vector store and retriever ready. ---")
 
 exit()
 
