@@ -12,7 +12,7 @@ from langchain_core.output_parsers import JsonOutputParser, StrOutputParser
 from langchain_community.document_loaders import FireCrawlLoader
 #from langchain_community.tools.tavily_search import TavilySearchResults
 from langchain_tavily import TavilySearch
-from langchain_community.vectorstores import Chroma
+#from langchain_community.vectorstores import Chroma
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langgraph.graph import END, StateGraph
 from typing_extensions import TypedDict
@@ -27,8 +27,6 @@ from firecrawl import FirecrawlApp
 from langchain.docstore.document import Document
 
 from langchain_pinecone import Pinecone
-
-
 
 
 
@@ -110,7 +108,7 @@ retriever = vectorstore.as_retriever()
 
 print("--- Pinecone vector store and retriever are ready. ---")
 
-
+exit()
 
 
 # --- 4. SETUP LLMS AND GRADERS ---
