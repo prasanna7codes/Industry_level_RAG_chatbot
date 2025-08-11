@@ -1,3 +1,11 @@
+# --- 2. DOCUMENT LOADING AND PROCESSING (Direct Firecrawl Method) ---
+
+# Make sure these imports are at the top of your file
+from firecrawl import FirecrawlApp
+from langchain.docstore.document import Document
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores.utils import filter_complex_metadata
+
 import os
 from pprint import pprint
 from typing import List
@@ -33,50 +41,57 @@ from langchain_pinecone import Pinecone
 
 # --- 2. DOCUMENT LOADING AND PROCESSING ---
 
-urls = ["https://www.thworks.org/"]
+# URLs to scrape
+urls = [
+    "https://www.thworks.org/",
+]
+
+# Use a list to store the loaded documents
 docs_list = []
 
+print("--- Scraping URLs directly using FirecrawlApp ---")
+# 1. Initialize the FirecrawlApp once, before the loop
 app = FirecrawlApp(api_key=os.environ["FIRECRAWL_API_KEY"])
 
-print("--- Scraping URLs using Firecrawl SDK ---")
 for url in urls:
     try:
-        result = app.scrape_url(url, formats=["markdown", "html"])
+        print(f"--- Scraping: {url} ---")
+        # The scrape_url method returns a ScrapeResponse object
+        scraped_data = app.scrape_url(url=url, formats=['markdown', 'html'])
+        print(scraped_data)
+        #scrape_result = app.scrape_url('firecrawl.dev', formats=['markdown', 'html'])
 
-        # Convert ScrapeResponse to dict if needed
-        if hasattr(result, "model_dump"):
-            result = result.model_dump()
-
-        # Debug print full result to understand what is returned
-        print(f"Full scrape result for {url}:", result)
-
-        # Extract content - prefer markdown, fallback to html
-        content = result.get("markdown", "")
-        if not content.strip():
-            content = result.get("html", "")
-
-        if not content.strip():
-            raise ValueError("Empty content returned")
-
-        docs_list.append(Document(page_content=content, metadata={"source": url}))
-        print(f"--- Successfully scraped: {url} ---")
+        # --- THIS IS THE FIX ---
+        # 3. Access data using dot notation (object.attribute) instead of dictionary keys
+        if scraped_data and scraped_data.markdown:
+            document = Document(
+                page_content=scraped_data.markdown,
+                # The 'metadata' attribute of the object IS a dictionary, so this works perfectly.
+                metadata=scraped_data.metadata if scraped_data.metadata else {}
+            )
+            docs_list.append(document)
+            print(f"--- Successfully scraped and created document for: {url} ---")
+        else:
+            print(f"--- WARN: No markdown content found for {url}. API Response: {scraped_data} ---")
 
     except Exception as e:
         print(f"--- FAILED to scrape {url}. Error: {e} ---")
 
+# Check if any documents were successfully scraped before proceeding
 if not docs_list:
-    print("\n--- ERROR: No documents were scraped. Exiting ---")
-    exit()
+    print("\n--- ERROR: No documents were scraped. Exiting because there is no content to process. ---")
+    exit() # Stop the script
 
+# This part remains the same, as it now receives a list of Document objects
 filtered_docs = filter_complex_metadata(docs_list)
 
 text_splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(
-    chunk_size=500,
-    chunk_overlap=100
+    chunk_size=500, chunk_overlap=100
 )
-doc_splits = text_splitter.split_documents(filtered_docs)
+doc_splits = text_splitter.split_documents(filtered_docs) # Use the filtered docs
 
-print(f"\n--- Successfully loaded and split {len(filtered_docs)} documents into {len(doc_splits)} chunks. ---")
+print(f"\n--- Successfully loaded and split {len(docs_list)} documents into {len(doc_splits)} chunks. ---")
+
 # --- 3. VECTOR STORE AND RETRIEVER ---
 
 # Use Google's embeddings model
@@ -89,7 +104,7 @@ index_name = "corrective-rag-app"
 
 # For this example, we'll pretend we're processing data for "client-abc-123"
 # In a real app, this would be dynamic based on which user is logged in.
-client_id_namespace = "client2-th-again" 
+client_id_namespace = "client2-wehive" 
 
 
 print(f"\n--- Adding documents to Pinecone index '{index_name}' in namespace '{client_id_namespace}' ---")
