@@ -23,7 +23,7 @@ from langchain_community.document_loaders import FireCrawlLoader
 
 from langchain_community.vectorstores.utils import filter_complex_metadata
 
-from firecrawl import FirecrawlApp
+from firecrawl import FirecrawlApp,ScrapeOptions
 from langchain.docstore.document import Document
 
 from langchain_pinecone import Pinecone
@@ -41,19 +41,26 @@ docs_list = []
 app = FirecrawlApp(api_key=os.environ["FIRECRAWL_API_KEY"])
 
 print("--- Scraping URLs using Firecrawl SDK ---")
-for url in urls:
-    try:
-        result = app.scrape_url(url, formats=["markdown", "html"])
-        if hasattr(result, "model_dump"):
-            result = result.model_dump()
-        print(f"Full scrape result for {url}:", result)
-        content = result.get("markdown", "") or result.get("html", "")
-        if not content.strip():
-            raise ValueError("Empty content returned")
-        docs_list.append(Document(page_content=content, metadata={"source": url}))
-        print(f"--- Successfully scraped: {url} ---")
-    except Exception as e:
-        print(f"--- FAILED to scrape {url}. Error: {e} ---")
+crawl_status = app.crawl_url(
+  'https://wehiveworkspace.com/', 
+  limit=2, 
+  scrape_options=ScrapeOptions(formats=['markdown'])
+)
+print(crawl_status)
+
+
+# Extract markdown text from the results
+
+for page in crawl_status.data:
+    if hasattr(page, "markdown") and page.markdown.strip():
+        docs_list.append(Document(
+            page_content=page.markdown,
+            metadata={"source": page.url}
+        ))
+
+print(f"Extracted {len(docs_list)} markdown documents")
+
+
 
 if not docs_list:
     print("\n--- ERROR: No website documents were scraped. Exiting ---")
@@ -113,7 +120,7 @@ print(f"--- Total documents to add to Pinecone: {len(all_docs)} ---")
 
 embedding_model = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
 index_name = "corrective-rag-app"
-client_id_namespace = "client2-th-again"
+client_id_namespace = "client-wehive-again"
 
 print(f"\n--- Adding all documents to Pinecone index '{index_name}' with namespace '{client_id_namespace}' ---")
 vectorstore = Pinecone.from_documents(
